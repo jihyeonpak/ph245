@@ -1,2 +1,2 @@
-# ph245
+# PH245
 Multivariate Statistics
