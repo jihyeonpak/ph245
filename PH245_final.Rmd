@@ -1,0 +1,225 @@
+---
+title: "PH245 Final Project: Modelling Heart Failure"
+author: "Jessica Pak"
+date: "12/13/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(glmnet)
+library(MASS)
+library(mda)
+library(class)
+library(caret)
+library(broom)
+library(randomForest)
+library(kernlab)
+
+```
+
+## Abstract
+Heart failure is a leading cause of death in the US, accounting for a high portion of healthcare spending. Electronic medical records of 299 patients with heart failure were analyzed and fitted with supervised machine learning models to classify patient survival and rank clinical features corresponding to the most important risk factors. Linear SVM was found be the most accurate in classifying patient's binary outcome of a death event, with prediction accuracy at 76.57%. Both logistic regression and random forest models ranked the most important clinical features to be age, CPK, ejection fraction, and serum creatinine (not in order of importance), while the random forest model also provided insight into 2 other predictors, platelets and serum sodium, that may also be important in predicting a death event from heart failure.
+
+## Background
+Cardiovascular diseases remain the leading cause of death in the US according to recent data, and mainly presents itself as myocardial infarctions and heart failure (HF). HF in the US afflicts about 6.2 million adults and was estimated to cost the nation $30.7 billion in 2012 (and likely more today). There are well-known risk factors for HF including coronary artery disease, diabetes, hypertension, obesity, other heart conditions, smoking tobacco, eating high fat, cholesterol, and/or sodium foods, physical inactivity, and/or excessive alcohol intake ([CDC](https://www.cdc.gov/heartdisease/heart_failure.htm)). Electronic medical records (EMR) of patients are able to quantify symptoms, physical features, and clinical test results. Multivariate statistical analysis can use these data features to detect patterns and correlations that may otherwise be undetected by healthcare professionals. Machine learning, in particular, can predict patients’ survival from their clinical data and highlight the most important features. With more accurate predictions, patients and healthcare professionals could intervene on the clinical and lifestyle factors putting patients most at risk of a death event and potentially decrease healthcare spending on heart failure complications.
+
+## Methods 
+In this report, I used EMR data obtained from [UCI Machine Learning Repository](http://archive.ics.uci.edu/ml/datasets.php) of 299 patients with heart failure, collected during their follow-up period. Each patient profile has 13 clinical features as shown below:
+
+- age: age of the patient (numeric, years) 
+- anaemia: decrease of red blood cells or hemoglobin (boolean) 
+- high blood pressure: if the patient has hypertension (boolean) 
+- creatinine phosphokinase (CPK): level of the CPK enzyme in the blood (numeric, mcg/L) 
+- diabetes: if the patient has diabetes (boolean) 
+- ejection fraction: percentage of blood leaving the heart at each contraction (numeric, percentage) 
+- platelets: platelets in the blood (numeric, kiloplatelets/mL) 
+- sex: woman or man (binary) 
+- serum creatinine: level of serum creatinine in the blood (numeric, mg/dL) 
+- serum sodium: level of serum sodium in the blood (numeric, mEq/L) 
+- smoking: if the patient smokes or not (boolean) 
+- time: follow-up period (numeric, days) 
+- [target] death event: if the patient deceased during the follow-up period (boolean). 
+
+Because the variable "time" does not quantify a patient's physical or lifestyle feature, I decided to exclude it as an independent (predictor) variable in my analyses. Thus, a total of 11 independent variables (age:smoking) were included with 1 dependent (outcome) variable, death event.
+```{r, echo = F}
+# import data
+hf <- read.csv("https://archive.ics.uci.edu/ml/machine-learning-databases/00519/heart_failure_clinical_records_dataset.csv")
+
+hf <- hf[, -12]
+```
+I started with a simple classification method using a logistic regression model. After diagnosis of this model, I compared the prediction accuracy rates of different supervised machine learning methods, including random forests (RF), k-Nearest Neighbors (KNN), and support vector machines (SVM, linear and radial) using k-fold cross-validation. Based on the results of these comparisons, I then compared feature rankings from the logistic regression model to a supervised machine learning model. Given the comparable accuracy of the RF model to the logistic regression model (as shown in results), as well as its feature ranking techniques: mean accuracy reduction and Gini impurity reduction, I used the RF model to compare important clinical features to the ones detected by the logistic regression model. Using different supervised machine learning methods, I aimed to predict patients’ survival from heart failure and determine which predictor variables from this clinical dataset were significant. 
+
+## Results
+
+**Logistic regression model**
+```{r logistic regression model, echo= F}
+# categorical variables in dataset
+hf[, 2] <- as.factor(hf[, 2])
+hf[, 4] <- as.factor(hf[, 4])
+hf[, 6] <- as.factor(hf[, 6])
+hf[, 10] <- as.factor(hf[, 10])
+hf[, 11] <- as.factor(hf[, 11])
+hf[, 12] <- as.factor(hf[, 12])
+
+# fit the logistic regression model
+model <- glm(DEATH_EVENT ~., data = hf, family = binomial)
+summary(model)
+
+# Predict the probability (p) of death event
+probabilities <- predict(model, type = "response")
+```
+Based on the output, coefficients for age, CPK, ejection fraction, and serum creatinine seemed to be significant ($\alpha > 0.05$). 
+
+Before accepting these results, I needed to perform diagnosis of the model. Assumptions to check for in my logistic regression model were as follows:
+
+**1. Outcome is a binary or dichotomous variable**
+```{r assumption 1, echo = F}
+# binary outcome variable
+table(hf$DEATH_EVENT)
+```
+**2. Linearity between the log odds of the outcome and each continuous predictor variables**
+```{r assumption 2, echo = F}
+# continuous predictor variables
+mydata <- hf %>%
+  dplyr::select_if(is.numeric) 
+
+predictors <- colnames(mydata)
+
+# Bind the logit and tidying the data for plot
+mydata <- mydata %>%
+  mutate(logit = log(probabilities/(1-probabilities))) %>%
+  gather(key = "predictors", value = "predictor.value", -logit)
+
+# plotting linearity
+ggplot(mydata, aes(logit, predictor.value))+
+  geom_point(size = 0.5, alpha = 0.5) +
+  geom_smooth(method = "loess") + 
+  theme_bw() + 
+  facet_wrap(~predictors, scales = "free_y")
+```
+Continuous predictor variables in the dataset were age, CPK, ejection fraction, platelets, serum creatinine, and serum sodium. As shown from the plots, not all continuous predictor variables had a linear relationship with the log odds of the outcome variable.
+
+**3. No influential values (extreme values or outliers) in the continuous predictors**
+```{r assumption 3, echo =F}
+# top 6 largest outlier points
+plot(model, which = 4, id.n = 6)
+
+# broom package
+model.data <- augment(model) %>% 
+  mutate(index = 1:n()) 
+
+model.data$DEATH_EVENT <- as.factor(model.data$DEATH_EVENT)
+# to check if outliers are influential
+model.data %>% 
+  ggplot(aes(index, .std.resid)) + 
+  geom_point(aes(color = DEATH_EVENT), alpha = .5) +
+  scale_colour_manual(labels = c("Death", "No Death"),  values = c("red", "black")) +
+  theme_bw()
+```
+Top 6 outliers are highlighted in the Cook's distance plot. Not all outliers are influential observations. To check whether the data contains potential influential observations, the standardized residual error were inspected in the next scatterplot. Among these outliers, there were no standardized residuals above absolute value of 3, therefore, no influential observations in data.
+
+**4. No high intercorrelations (i.e. multicollinearity) among the predictors**
+```{r assumption 4, echo =F}
+car::vif(model)
+```
+No evidence of multicollinearity: all predictor variables have VIF values below 5.\  
+
+**Prediction accuracy comparisons of supervised machine learning methods**
+Given that some assumptions were met and others were not, this logistic regression model may not have been the most accurate. The prediction accuracy of this model was compared to other non-parametric classification methods (KNN, RF, linear SVM, and radial SVM) to assess which model can most accurately predict death outcome based on the same clinical features. To compare the accuracy of supervised machine learning methods, k-fold cross validation (k=10) was used. 
+```{r k-fold cross validation logistic regression, echo = F}
+set.seed(100)
+
+train <- trainControl(method = "cv", number = 10, savePredictions=TRUE)
+
+logreg_fit <- train(DEATH_EVENT ~., data = hf, method = "glm", trControl= train, tuneLength = 0)
+
+logreg_fit
+```
+```{r k-fold cross validation KNN, echo = F}
+set.seed(100)
+
+train1 <- trainControl(method = "cv", number = 10, savePredictions=TRUE)
+
+knn_fit <- train(DEATH_EVENT ~., data = hf, method = "knn", trControl= train1)
+
+knn_fit
+```
+```{r k-fold cross validation random forest, echo = F}
+set.seed(100)
+
+train2 <- trainControl(method = "cv", number = 10, savePredictions=TRUE)
+
+rf_fit <- train(DEATH_EVENT ~., data = hf, method = "rf", trControl= train2)
+
+rf_fit
+```
+```{r linear svm, echo =F}
+set.seed(100)
+
+train3 <- trainControl(method = "cv", number = 10, savePredictions=TRUE)
+
+lsvm_fit <- train(DEATH_EVENT ~., data = hf, method = "svmLinear", trControl= train3)
+
+lsvm_fit
+```
+```{r radial svm, echo = F}
+set.seed(100)
+
+train4 <- trainControl(method = "cv", number = 10, savePredictions=TRUE)
+
+rsvm_fit <- train(DEATH_EVENT ~., data = hf, method = "svmRadial", trControl= train4)
+
+rsvm_fit
+```
+Based on these cross validation results, linear SVM produced the highest accuracy at 0.7656952 (76.57%) with cost parameter held constant at 1.
+
+**Feature rankings**
+With the comparable accuracy of the RF model (0.7391435 for mtry = 2) to the logistic regression model (0.7386837) as well as its feature ranking techniques (mean Gini impurity reduction), the RF model was further employed to compare important clinical features to the ones that were detected by the logistic regression model earlier. Data was randomly split into 80% training (n= 239) and 20% testing (n= 60) to fit the training dataset in the RF model with 500 trees split at 2 randomly selected variables.
+
+```{r, random forest, echo = F}
+# splitting data into 80% training 20% testing
+set.seed(1000)
+X <- hf[, -12]
+Y <- hf[, 12]
+
+test_sample <- sort(sample(seq(1, nrow(X)), size = 60))
+
+# testing set n = 239
+X.test <- as.matrix(X[test_sample, ])
+Y.test <- Y[test_sample]
+
+# training set n = 60
+X.train <- as.matrix(X[-test_sample, ])
+Y.train <- Y[-test_sample]
+
+
+# random forest model
+rf <- randomForest(x = X.train,
+                   y = Y.train,
+                   ntree = 500,
+                   mtry = 2)
+
+# Predicting the test set results
+p.hat = predict(rf, newdata = X.test)
+  
+# Confusion Matrix
+confusion_mtx = table(p.hat, Y.test)
+confusion_mtx
+
+# Importance plot
+importance(rf)
+```
+The confusion matrix is presented first, the RF model has a misclassification rate of 0.2833333. Overall, the feature rankings from the RF model confirmed the logistic regression's significant predictors (age, CPK, ejection fraction, and serum creatinine) and provided insight into the other predictors (platelets and serum sodium) that may also be important in predicting a death event from heart failure. 
+
+## Discussion
+Results in this report show that it might be possible to predict the survival of patients with heart failure solely from the 11 predictor variables that describe a patient's clinical and lifestyle features. Due to different distributions and variations in these predictor variables, some assumptions of the logistic regression model were unmet. 
+
+Comparison of the model's prediction accuracy to other supervised machine learning models showed that linear SVM was the best model, at rate of 76.57% for prediction accuracy. The accuracy rate results were unexpected, as I would have expected the training sets of the more complex models (KNN, RF, and SVM) to have performed significantly better than the logistic regression model. However, KNN performed worse, and the other models performed only slightly better than the logistic regression model. This could have been due to relatively smaller sample sizes of the dataset that was randomly split into the training, testing, and validation sets in the cross-validation or perhaps the number of folds (k =10) that was chosen for the k-fold cross-validation. Further analysis of other non-parametric supervised methods as well as larger number of clinical records could provide more accurate comparisons. 
+
+In addition to classification comparisons, the feature ranking results between the logistic regression and RF model were relatively similar. In predicting a death event and the odds of a death event from heart failure, the clinical features age, CPK, ejection fraction, and serum creatinine were ranked important in both models, with the RF model including platelets and serum sodium. The limitations of the heart failure dataset should also be considered. There are many other features that were not included but nonetheless significant, such as weight, diet, exercise, occupation, etc. Further tests with random forest models of a larger (including records from other geographical regions) and expanded dataset could provide a more holistic approach and rank patients' clinical and/or lifestyle features more accurately. 
+
+Overall, the approach to modelling heart failure in this report showed that supervised machine learning can be used effectively for binary classification of electronic medical records of patients with cardiovascular hearth diseases.
+
