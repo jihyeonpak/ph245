@@ -132,7 +132,7 @@ ggplot(df, aes(y = cooks, x = obs)) +
 # which points may be influential
 mydata[which(abs(influence_cooks) > cooks_crit),]
 ```
-Outliers are highlighted in the standardized residual plot. Among these outliers, there were no standardized residuals above absolute value of 3, therefore, no outlier observations in data. Not all outliers are influential observations. To check whether the data contains potential influential observations, the cook's distance plot with $Di > 0.5$ critical point (where points may be worth investigating for potentially high leverage). No data points are above this line, therefore no potential influential points are observed among the predictor variables. 
+Outliers are highlighted in the standardized residual plot. Among these outliers, there were no standardized residuals above absolute value of 3, therefore, no outlier observations in data. Not all outliers are influential observations. To check whether the data contains potential influential observations, the cook's distance plot with $Di > 0.5$ critical point (where points may be worth investigating for potentially high leverage). No data points were identified above this critical point, therefore no potential influential points were observed among the predictor variables in the model. 
 
 **4. No high intercorrelations (i.e. multicollinearity) among the predictors**
 ```{r assumption 4, echo =F}
