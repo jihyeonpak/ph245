@@ -104,22 +104,35 @@ Continuous predictor variables in the dataset were age, CPK, ejection fraction, 
 
 **3. No influential values (extreme values or outliers) in the continuous predictors**
 ```{r assumption 3, echo =F}
-# top 6 largest outlier points
-plot(model, which = 4, id.n = 6)
-
 # broom package
 model.data <- augment(model) %>% 
   mutate(index = 1:n()) 
 
 model.data$DEATH_EVENT <- as.factor(model.data$DEATH_EVENT)
-# to check if outliers are influential
+# to check for outlier with standardized residual plot
 model.data %>% 
   ggplot(aes(index, .std.resid)) + 
   geom_point(aes(color = DEATH_EVENT), alpha = .5) +
   scale_colour_manual(labels = c("Death", "No Death"),  values = c("red", "black")) +
   theme_bw()
+
+# diagnostic test for influential points with cook's distance plot:
+cooks_crit = 0.5
+influence_cooks <- cooks.distance(model)
+df <- data.frame(obs = names(influence_cooks),
+                 cooks = influence_cooks)
+ggplot(df, aes(y = cooks, x = obs)) +
+  geom_point() +
+  geom_hline(yintercept = cooks_crit, linetype="dashed") +
+  labs(title = "Cook's Distance",
+       subtitle = "Potential Influential Observations",
+       x = "Observation Number",
+       y = "Cook's")
+
+# which points may be influential
+mydata[which(abs(influence_cooks) > cooks_crit),]
 ```
-Top 6 outliers are highlighted in the Cook's distance plot. Not all outliers are influential observations. To check whether the data contains potential influential observations, the standardized residual error were inspected in the next scatterplot. Among these outliers, there were no standardized residuals above absolute value of 3, therefore, no influential observations in data.
+Outliers are highlighted in the standardized residual plot. Among these outliers, there were no standardized residuals above absolute value of 3, therefore, no outlier observations in data. Not all outliers are influential observations. To check whether the data contains potential influential observations, the cook's distance plot with $Di > 0.5$ critical point (where points may be worth investigating for potentially high leverage). No data points are above this line, therefore no potential influential points are observed among the predictor variables. 
 
 **4. No high intercorrelations (i.e. multicollinearity) among the predictors**
 ```{r assumption 4, echo =F}
